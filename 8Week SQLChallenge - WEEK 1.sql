@@ -1,0 +1,281 @@
+CREATE SCHEMA dannys_diner;
+
+SELECT DATABASE();
+
+USE dannys_diner;
+
+CREATE TABLE sales (
+                     customer_id  VARCHAR(1),
+					 order_date DATE,
+					 product_id INTEGER
+                     );
+                     
+DESCRIBE sales;
+
+INSERT INTO sales(
+                   customer_id, 
+                   order_date, 
+                   product_id)
+            VALUES
+				  ('A', '2021-01-01', '1'),
+				  ('A', '2021-01-01', '2'),
+				  ('A', '2021-01-07', '2'),
+				  ('A', '2021-01-10', '3'),
+				  ('A', '2021-01-11', '3'),
+				  ('A', '2021-01-11', '3'),
+				  ('B', '2021-01-01', '2'),
+				  ('B', '2021-01-02', '2'),
+				  ('B', '2021-01-04', '1'),
+				  ('B', '2021-01-11', '1'),
+				  ('B', '2021-01-16', '3'),
+				  ('B', '2021-02-01', '3'),
+				  ('C', '2021-01-01', '3'),
+				  ('C', '2021-01-01', '3'),
+				  ('C', '2021-01-07', '3');
+
+CREATE TABLE menu (
+					  product_id INTEGER,
+					  product_name VARCHAR(5),
+					  price INTEGER
+				   );
+
+INSERT INTO menu (
+                   product_id, 
+                   product_name, 
+                   price)
+           VALUES
+				  ('1', 'sushi', '10'),
+				  ('2', 'curry', '15'),
+				  ('3', 'ramen', '12');
+  
+CREATE TABLE members (
+                  customer_id VARCHAR(1),
+                  join_date DATE
+                   );
+
+INSERT INTO members (
+                    customer_id, 
+                    join_date)
+			VALUES
+				  ('A', '2021-01-07'),
+				  ('B', '2021-01-09');
+  
+-- What is the total amount each customer spent at the restaurant?
+
+SELECT 
+		customer_id, 
+        sum(price) as total_amount
+FROM 
+		sales s 
+JOIN
+		menu m 
+	ON 
+		s.product_id = m.product_id
+GROUP BY 
+		customer_id;
+
+-- How many days has each customer visited the restaurant?
+
+SELECT 
+		customer_id,
+        COUNT( DISTINCT order_date) as customer_visited_days
+FROM 
+		sales
+GROUP BY 
+		customer_id;
+
+-- What was the first item from the menu purchased by each customer?
+
+SELECT 
+		customer_id, 
+        product_name
+FROM  
+		( select 
+				customer_id, 
+                product_id,
+                row_number() OVER (PARTITION BY customer_id ORDER BY order_date) as order_number FROM sales ) temptable 
+JOIN
+		menu m
+	ON 
+		temptable.product_id =m.product_id
+WHERE 
+		order_number = 1;
+
+-- What is the most purchased item on the menu and how many times was it purchased by all customers?
+
+SELECT 
+		product_name ,
+        COUNT(customer_id)
+FROM 
+		sales s 
+JOIN 
+		menu m
+	ON 
+		s.product_id = m. product_id
+GROUP BY 
+		product_name
+ORDER BY 
+		COUNT(customer_id) DESC
+LIMIT 1;
+
+-- Which item was the most popular for each customer?
+
+SELECT  
+		customer_id, 
+        product_name, 
+        popularity_position
+FROM 
+	(SELECT 
+			customer_id ,
+			 product_id, 
+             COUNT(product_id) AS quantity ,
+             RANK() OVER (PARTITION BY customer_id ORDER BY count(product_id) DESC) AS popularity_position FROM sales GROUP BY product_id, customer_id) temptable
+JOIN 
+		menu m
+	ON 
+		temptable.product_id = m.product_id
+HAVING 
+		popularity_position = 1
+ORDER BY 
+		customer_id;
+
+-- Which item was purchased first by the customer after they became a member?
+WITH cte AS(
+	SELECT
+			mb.customer_id, 
+            m.product_id,
+            product_name,
+            first_value(m.product_id) over(partition by customer_id order by purchasing_rank)  as product_id_after_membership
+	FROM  
+		(select
+			customer_id,
+			order_date,
+			product_id, 
+			rank() over (partition by customer_id order by order_date) as purchasing_rank from sales ) temptable 
+	JOIN 
+			members mb
+		ON 
+			temptable.customer_id = mb.customer_id
+	JOIN
+			menu m
+		ON 
+			temptable.product_id = m.product_id
+	WHERE  
+			order_date>= join_date )
+
+SELECT 
+		customer_id,
+        product_name
+FROM 
+		cte
+GROUP BY 
+		customer_id;
+
+-- Which item was purchased just before the customer became a member?
+WITH cte AS(
+	SELECT 
+			mb.customer_id,
+			m.product_id,
+            product_name,
+            last_value(m.product_id) over (partition by customer_id order by purchasing_rank ) as product_id_before_membership
+	FROM  
+		(select 
+			customer_id,
+			order_date,
+			product_id, 
+			rank() over (partition by customer_id order by order_date) as purchasing_rank from sales ) temptable 
+	JOIN 
+			members mb
+		ON 
+			temptable.customer_id = mb.customer_id
+	JOIN
+			menu m
+		ON 
+			temptable.product_id = m.product_id
+	WHERE 
+			order_date< join_date )
+
+SELECT 
+		customer_id, 
+        product_name
+FROM 
+		cte
+GROUP BY 
+		customer_id;
+
+-- What is the total items and amount spent for each member before they became a member?
+SELECT 
+		s.customer_id,
+        count(product_name) as total_items,
+        sum(price) as amount_spent
+FROM 
+		sales s
+JOIN 
+		menu m 
+	ON 
+		s.product_id = m.product_id
+JOIN 
+		members mb
+	ON 
+		s.customer_id = mb.customer_id
+WHERE 
+		order_date<join_date
+GROUP BY
+		customer_id
+ORDER BY 
+		customer_id;
+
+-- If each $1 spent equates to 10 points and sushi has a 2x points multiplier - how many points would each customer have?
+
+SELECT 
+		s.customer_id,
+	    sum(
+        CASE 
+			WHEN product_name = "sushi" 
+					THEN price* 20
+            ELSE 
+					price*10
+            END) 
+				AS points
+FROM 
+		sales s 
+JOIN 
+		menu m
+	ON 
+		s.product_id = m.product_id
+GROUP BY 
+		customer_id
+ORDER BY 
+		customer_id;
+
+-- In the first week after a customer joins the program (including their join date) they earn 2x points on all items, not just sushi - how many points do customer A and B have at the end of January?
+
+SELECT 
+		s.customer_id, 
+        SUM( 
+        CASE 
+			WHEN product_name = "sushi" 
+					THEN price*20
+			WHEN order_date BETWEEN join_date AND join_date+7 
+					THEN price*20
+			ELSE 
+				price*10
+			END) 
+				AS total_points
+FROM 
+		sales s 
+JOIN 
+		menu m 
+	ON 
+		s.product_id = m.product_id
+JOIN 
+		members mb 
+	ON 
+		s.customer_id = mb.customer_id
+WHERE 
+		order_date <= "2021-01-31"
+GROUP BY 
+		s.customer_id
+ORDER BY 
+		s.customer_id;
+
