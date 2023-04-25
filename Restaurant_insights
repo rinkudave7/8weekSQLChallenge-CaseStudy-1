@@ -1,4 +1,4 @@
-CREATE SCHEMA dannys_diner;
+CREATE SCHEMA dannys_diner; 
 
 SELECT DATABASE();
 
